@@ -184,8 +184,7 @@ public:
     if (block_diff == 0) {
 
       // u and v are in the same block.  One naive_rmq search suffices.
-      const sub_block_rmq &naive = *_sub_block_rmq_array[u_block_idx];
-      return (u_block_idx * block_size()) + naive.query_offset(u_offset, v_offset + 1);
+      return (u_block_idx * block_size()) + u_naive.query_offset(u_offset, v_offset + 1);
 
     } else {
 
