@@ -2,7 +2,6 @@
  * Implements the sparse <O(n log n), O(1)> RMQ solution.
  */
 
-#include <iostream>
 #include <algorithm>
 #include <cmath>
 #include <iterator>

@@ -1,4 +1,3 @@
-#include <iostream>
 #include "pm_rmq.hpp"
 #include "pm_rmq_test.hpp"
 
