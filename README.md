@@ -7,12 +7,12 @@ Implementations of LCA and RMQ data structures from
 All implementations take some care to work with generic types, and the
 code is therefore a bit hard to read, sorry about that.
 
-Generally, iterator types should be RandomAccessIterators, difference
+Generally, iterator types should be `RandomAccessIterators`, difference
 types should be signed (they'll be subtracted from one another and
 compared) and value types should have sensible comparison and equality
-operators, and for the pm_rmq structure they need a reasonable operator-()
-so we can normalize sub blocks.  The values will also be copied a few
-times, so avoid huge values if you can.
+operators, and for the `pm_rmq` structure they need a reasonable
+`operator-()` so we can normalize sub blocks.  The values will also be
+copied a few times, so avoid huge values if you can.
 
 naive_rmq
 ---------
