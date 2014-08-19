@@ -126,7 +126,7 @@ public:
                   boost::make_zip_iterator(boost::make_tuple(e - 1, e)),
                   [b, e](const boost::tuple<const value_type&, const value_type&>& t) {
                     auto diff = t.template get<0>() - t.template get<1>();
-                    assert(diff >= -1 && diff <= 1);
+                    assert(diff == -1 || diff == 1);
                   });
 #endif
 
