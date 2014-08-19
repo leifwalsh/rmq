@@ -19,6 +19,11 @@ naive_rmq
 Implements the `<O(n^2), O(1)>` naive RMQ algorithm, where the answers to
 every possible RMQ query are computed and stored ahead of time.
 
+Warning: the naive implementation uses `O(n^2)` memory and therefore
+before running it you should really lower `N` in `rmq_test.hpp` to
+something pretty small (10000 works on an 8GB, 64-bit machine), or you'll
+run out of memory very quickly.
+
 sparse_rmq
 ----------
 
