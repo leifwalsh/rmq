@@ -26,18 +26,27 @@ class naive_rmq : public rmq<iterator_type, value_type, difference_type> {
   /**
    * 2D array of precomputed answers.
    *
-   * _arr[a][b] is the index of the minimum value in the range [a, a+b].
+   * _arr[b][a] is the index of the minimum value in the range [a, a+b+1].
    */
   std::vector<std::vector<difference_type>> _arr;
 
   /**
-   * Dynamic program to fill in _arr.
+   * Dynamic program to compute the answers to every possible query on the
+   * input.
    */
   void fill_in() {
+    // The first level _arr[0] contains the answers to RMQ queries on
+    // intervals of length 1, which must just be the first element in the
+    // interval.
     std::copy_n(boost::counting_iterator<difference_type>(0), n(),
                 std::back_inserter(_arr[0]));
 
-    for (auto it = _arr.begin(); it + 2 <= _arr.end(); ++it) {
+    // Fill in each consecutive level by choosing the smaller of each
+    // neighboring values in the previous level.
+    for (auto it = _arr.begin(); it + 1 < _arr.end(); ++it) {
+      // Zips neighboring indexes of this level together with a functor
+      // that chooses the index producing the lesser value, from each pair
+      // of indexes.
       std::transform(it->begin(), it->end() - 1,
                      it->begin() + 1,
                      std::back_inserter(*(it + 1)),

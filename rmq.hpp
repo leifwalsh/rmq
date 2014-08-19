@@ -21,7 +21,7 @@ class rmq {
   const iterator_type _begin;
 
   /**
-   * Endof the input array.
+   * End of the input array.
    */
   const iterator_type _end;
 
@@ -31,8 +31,14 @@ protected:
 
   iterator_type end() const { return _end; }
 
+  /**
+   * Problem size.
+   */
   difference_type n() const { return _end - _begin; }
 
+  /**
+   * Shorthand useful in some places.
+   */
   const value_type &val(difference_type i) const { return _begin[i]; }
 
 public:
@@ -54,6 +60,13 @@ public:
    */
   virtual difference_type query(iterator_type u, iterator_type v) const = 0;
 
+  /**
+   * Same query but using integer offsets from _begin rather than
+   * iterators.
+   *
+   * Preconditions:
+   *  0 <= u <= v <= n().
+   */
   difference_type query_offset(difference_type uo, difference_type vo) const {
     return query(begin() + uo, begin() + vo);
   }

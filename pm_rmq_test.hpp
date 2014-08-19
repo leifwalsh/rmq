@@ -26,16 +26,6 @@ namespace rmq_test {
       assert(input[_ret] == input[(expect)]);                           \
     } while (0)
 
-    if (0) {
-      int input[] = {
-        1,
-      };
-
-      impl im(&input[0], input + ((sizeof input) / (sizeof *input)));
-
-      EXPECT_RMQ(0, 1, 0);
-    }
-
     {
       int input[] = {
         1,
@@ -52,39 +42,6 @@ namespace rmq_test {
       EXPECT_RMQ(0, 2, 0);
       EXPECT_RMQ(2, 6, 5);
       EXPECT_RMQ(3, 6, 5);
-    }
-
-    if (0) {
-      int input[] = {
-        3,
-        1,
-        2,
-        1,
-        4,
-        5,
-      };
-
-      impl im(&input[0], input + ((sizeof input) / (sizeof *input)));
-
-      EXPECT_RMQ(0, 3, 1);
-      EXPECT_RMQ(0, 2, 1);
-      EXPECT_RMQ(2, 6, 3);
-      EXPECT_RMQ(3, 6, 3);
-    }
-
-    if (0) {
-      int input[] = {
-        3,
-        1,
-        1,
-        1,
-        4,
-        5,
-      };
-
-      impl im(&input[0], input + ((sizeof input) / (sizeof *input)));
-
-      EXPECT_RMQ(0, 3, 2);
     }
 #undef EXPECT_RMQ
   }

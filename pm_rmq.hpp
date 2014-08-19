@@ -9,6 +9,7 @@
 #include <iterator>
 #include <map>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include <boost/iterator/counting_iterator.hpp>
@@ -38,6 +39,9 @@ class pm_rmq : public rmq<iterator_type, value_type, difference_type> {
    */
   const difference_type _logn;
 
+  /**
+   * The block size is lg(n)/2.
+   */
   const difference_type block_size() const {
     return std::max(difference_type(1), _logn / 2);
   }
@@ -45,15 +49,16 @@ class pm_rmq : public rmq<iterator_type, value_type, difference_type> {
   /**
    * Arrays of length 2n/lg(n) where the first array contains the minimum
    * element in the ith block of the input, and the second contains the
-   * position of that element.
+   * position of that element (as an offset from the beginning of the
+   * original input, not from the beginning of the block).
    */
   std::vector<value_type> _super_array_vals;
   std::vector<difference_type> _super_array_idxs;
 
   /**
-   * The sparse RMQ implementation over _super_array;
+   * The sparse RMQ implementation over _super_array_vals;
    */
-  std::unique_ptr<sparse_rmq<typename std::vector<value_type>::const_iterator>> _super_rmq;
+  std::unique_ptr<sparse_rmq<typename std::vector<value_type>::const_iterator> > _super_rmq;
 
   /**
    * We use a vector<value_type> to represent a normalized block.  We
@@ -63,17 +68,50 @@ class pm_rmq : public rmq<iterator_type, value_type, difference_type> {
    * We keep a map of them while building them to dedupe and to own the
    * memory, and an array of them indexed by block number to use at query
    * time.
+   *
+   * This is the biggest opportunity for optimization.  The paper suggests
+   * keeping a table of all sqrt(n) possible sub blocks.  We only keep
+   * ones that exist in order to simplify handling of the last block
+   * (which might be shorter).  However, our solution involves a bunch of
+   * copying that makes it slower.
    */
   typedef std::vector<value_type> block_identifier;
-  std::map<block_identifier, std::unique_ptr<naive_rmq<typename std::vector<value_type>::const_iterator>>> _sub_block_rmqs;
-  std::vector<naive_rmq<typename std::vector<value_type>::const_iterator> *> _sub_block_rmq_array;
 
-  static std::vector<value_type> normalize(iterator_type b, iterator_type e) {
-    std::vector<value_type> normalized_block;
+  /**
+   * We'll use a naive_rmq over block_identifiers to represent the
+   * precomputed RMQ answers for sub blocks.
+   */
+  typedef naive_rmq<typename std::vector<value_type>::const_iterator> sub_block_rmq;
+
+  /**
+   * The map from block_identifier to the naive_rmq solution on blocks of
+   * that shape.  This map is responsible for the lifetime of each
+   * naive_rmq, and for ensuring that we only build one naive_rmq for each
+   * shape of sub block.  Once the naive_rmq structures are built, we
+   * don't really use this map again.
+   */
+  std::map<block_identifier, std::unique_ptr<sub_block_rmq> > _sub_block_rmqs;
+
+  /**
+   * An array mapping sub blocks (by their index) to the naive_rmq
+   * implementation representing sub blocks of their shape.  We need to do
+   * this lookup at query time so we can't afford to reconstruct the
+   * block_identifier and query in the map.
+   */
+  std::vector<sub_block_rmq *> _sub_block_rmq_array;
+
+  /**
+   * Normalizes a sub_block so that it starts with 0.  Appends results to
+   * an OutputIterator.
+   */
+  template<
+    typename OutputIterator
+    >
+  static void normalize(iterator_type b, iterator_type e,
+                        OutputIterator o) {
     const value_type &init = *b;
-    std::transform(b, e, std::back_inserter(normalized_block),
+    std::transform(b, e, o,
                    [init](const value_type &val) { return val - init; });
-    return normalized_block;
   }
 
 public:
@@ -82,6 +120,7 @@ public:
       _logn(std::max(difference_type(1),
                      difference_type(std::floor(std::log2(n())))))
   {
+#ifndef NDEBUG
     // Check the ±1 property.
     std::for_each(boost::make_zip_iterator(boost::make_tuple(b, b + 1)),
                   boost::make_zip_iterator(boost::make_tuple(e - 1, e)),
@@ -89,77 +128,100 @@ public:
                     auto diff = t.template get<0>() - t.template get<1>();
                     assert(diff >= -1 && diff <= 1);
                   });
+#endif
 
+    // For each sub_block, we'll add it to the _super_arrays and also
+    // normalize it and compute its naive_rmq.
     for (iterator_type block_begin = begin(); block_begin < end(); block_begin += block_size()) {
-      _super_array_vals.push_back(*block_begin);
-      _super_array_idxs.push_back(block_begin - begin());
-      for (iterator_type cur = block_begin + 1; cur != block_begin + block_size() && cur != end(); ++cur) {
-        if (*cur < _super_array_vals.back()) {
-          _super_array_vals.back() = *cur;
-          _super_array_idxs.back() = cur - begin();
-        }
+      const iterator_type block_end = std::min(block_begin + block_size(), end());
+
+      // Find the min element of the block by brute force.
+      const iterator_type block_min = std::min_element(block_begin, block_end);
+      _super_array_vals.push_back(*block_min);
+      _super_array_idxs.push_back(block_min - begin());
+
+      // Compute the normalized block.
+      std::vector<value_type> normalized_block(block_end - block_begin);
+      normalize(block_begin, block_end, normalized_block.begin());
+
+      // Find the normalized block in the map of RMQ structures.  If not
+      // found, construct one.
+      std::unique_ptr<sub_block_rmq> &naive_ptr = _sub_block_rmqs[normalized_block];
+      if (!naive_ptr) {
+        naive_ptr.reset(new sub_block_rmq(normalized_block.begin(), normalized_block.end()));
       }
 
-      const std::vector<value_type> normalized_block = normalize(block_begin, std::min(block_begin + block_size(), end()));
-      std::unique_ptr<naive_rmq<typename std::vector<value_type>::const_iterator>> &naive_ptr = _sub_block_rmqs[normalized_block];
-      if (!naive_ptr) {
-        naive_ptr.reset(new naive_rmq<typename std::vector<value_type>::const_iterator>(normalized_block.begin(), normalized_block.end()));
-      }
+      // Either way, record a pointer to the RMQ structure at this
+      // sub_block's index.
       _sub_block_rmq_array.push_back(naive_ptr.get());
     }
 
+    // Construct the RMQ structure over the super array.
     _super_rmq.reset(new sparse_rmq<typename std::vector<value_type>::const_iterator>(_super_array_vals.begin(), _super_array_vals.end()));
   }
 
   difference_type query(iterator_type u, iterator_type v) const {
-    const typename std::vector<value_type>::difference_type u_block_idx = difference_type(u - begin()) / block_size();
-    const typename std::vector<value_type>::difference_type u_offset = difference_type(u - begin()) % block_size();
-    const typename std::vector<value_type>::difference_type v_block_idx = difference_type(v - 1 - begin()) / block_size();
-    const typename std::vector<value_type>::difference_type v_offset = difference_type(v - 1 - begin()) % block_size();
+    // The overall strategy here is straight from the paper.  We look up
+    // the blocks that contain u and v (taking care to consider v being
+    // the inclusive endpoint even though the API understands it to be
+    // exclusive), then use a sparse_rmq search over the super array among
+    // blocks strictly between u's and v's blocks, and do naive_rmq
+    // searches in the representative structures for the blocks with u's
+    // and v's blocks' shapes.
+    //
+    // Most of what's below is dealing with types and offset math, and
+    // isn't all that interesting.
 
-    const typename std::vector<value_type>::difference_type block_diff = v_block_idx - u_block_idx;
+    const difference_type u_block_idx = difference_type(u - begin()) / block_size();
+    const difference_type u_offset = difference_type(u - begin()) % block_size();
+    const difference_type v_block_idx = difference_type(v - 1 - begin()) / block_size();
+    const difference_type v_offset = difference_type(v - 1 - begin()) % block_size();
+
+    const sub_block_rmq &u_naive = *_sub_block_rmq_array[u_block_idx];
+    const sub_block_rmq &v_naive = *_sub_block_rmq_array[v_block_idx];
+
+    const difference_type block_diff = v_block_idx - u_block_idx;
     if (block_diff == 0) {
-      // u and v are in the same block.
-      auto naive = *_sub_block_rmq_array[u_block_idx];
+
+      // u and v are in the same block.  One naive_rmq search suffices.
+      const sub_block_rmq &naive = *_sub_block_rmq_array[u_block_idx];
       return (u_block_idx * block_size()) + naive.query_offset(u_offset, v_offset + 1);
-    } else if (block_diff == 1) {
-      // u and v are in adjacent blocks.
-      auto u_naive = *_sub_block_rmq_array[u_block_idx];
-      auto u_min_idx = (u_block_idx * block_size()) +
-        u_naive.query_offset(u_offset,
-                             std::min(end(), begin() + ((u_block_idx + 1) * block_size())) - (begin() + (block_size() * u_block_idx)));
-      auto v_naive = *_sub_block_rmq_array[v_block_idx];
-      auto v_min_idx = (v_block_idx * block_size()) + v_naive.query_offset(0, v_offset + 1);
-      return val(u_min_idx) < val(v_min_idx) ? u_min_idx : v_min_idx;
-    } else if (block_diff == 2) {
-      // u and v have one block in between.
-      auto u_naive = *_sub_block_rmq_array[u_block_idx];
-      auto u_min_idx = (u_block_idx * block_size()) +
-        u_naive.query_offset(u_offset,
-                             std::min(end(), begin() + ((u_block_idx + 1) * block_size())) - (begin() + (block_size() * u_block_idx)));
-      auto v_naive = *_sub_block_rmq_array[v_block_idx];
-      auto v_min_idx = (v_block_idx * block_size()) + v_naive.query_offset(0, v_offset + 1);
-      if (val(u_min_idx) < val(v_min_idx)) {
-        return val(u_min_idx) < _super_array_vals[u_block_idx + 1] ? u_min_idx : _super_array_idxs[u_block_idx + 1];
-      } else {
-        return val(v_min_idx) < _super_array_vals[u_block_idx + 1] ? v_min_idx : _super_array_idxs[u_block_idx + 1];
-      }
+
     } else {
-      // Full algorithm, using the sparse RMQ implementation between u's and v's blocks.
-      const auto uend = std::min(end(),
-                                 begin() + (block_size() * (u_block_idx + 1)));
-      sparse_rmq<iterator_type> cheater1(u, uend);
-      const difference_type first_block_min = cheater1.query(u, uend);
-      const auto vbegin = begin() + (block_size() * v_block_idx);
-      sparse_rmq<iterator_type> cheater2(vbegin, v);
-      const difference_type last_block_min = cheater2.query(vbegin, v);
-      const typename std::vector<value_type>::difference_type super_idx = _super_rmq->query(_super_array_vals.begin() + u_block_idx + 1,
-                                                                                             _super_array_vals.begin() + v_block_idx);
-      if (*(u + first_block_min) < _super_array_vals[super_idx]) {
-        return *(u + first_block_min) < *(vbegin + last_block_min) ? (u + first_block_min - begin()) : (vbegin + last_block_min - begin());
+
+      const iterator_type u_block_end = std::min(end(), begin() + ((u_block_idx + 1) * block_size()));
+
+      // u and v are in different blocks.  First, do naive_rmq searches in
+      // each block from u to the end of its block, and from the beginning
+      // of v's block to v.  Then also translate these to offsets within
+      // the original array, because that's what we intend to return.
+      const difference_type u_min_idx = (u_block_idx * block_size()) +
+        u_naive.query_offset(u_offset,
+                             u_block_end - (begin() + (block_size() * u_block_idx)));
+      const difference_type v_min_idx = (v_block_idx * block_size()) +
+        v_naive.query_offset(0, v_offset + 1);
+
+      if (block_diff == 1) {
+
+        // u and v are in adjacent blocks.  Don't query the super array,
+        // it doesn't handle zero-length intervals properly.
+        return val(u_min_idx) < val(v_min_idx) ? u_min_idx : v_min_idx;
+
       } else {
-        return *(vbegin + last_block_min) < _super_array_vals[super_idx] ? (vbegin + last_block_min - begin()) :
-          _super_array_idxs[super_idx];
+
+        // Full algorithm, using the sparse RMQ implementation on the
+        // super array between u's and v's blocks.
+
+        const difference_type super_idx = _super_rmq->query(_super_array_vals.begin() + u_block_idx + 1,
+                                                            _super_array_vals.begin() + v_block_idx);
+
+        const value_type &u_min_val = val(u_min_idx);
+        const value_type &v_min_val = val(v_min_idx);
+        if (u_min_val < v_min_val) {
+          return u_min_val < _super_array_vals[super_idx] ? u_min_idx : _super_array_idxs[super_idx];
+        } else {
+          return v_min_val < _super_array_vals[super_idx] ? v_min_idx : _super_array_idxs[super_idx];
+        }
       }
     }
   }

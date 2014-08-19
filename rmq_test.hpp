@@ -113,6 +113,7 @@ namespace rmq_test {
 
   template<typename impl>
   void vector_test() {
+    // Lower this number if you want to run naive_rmq.
     size_t N = 1000000;
     std::vector<int> input(N);
     for (std::vector<int>::iterator it = input.begin(); it != input.end(); ++it) {

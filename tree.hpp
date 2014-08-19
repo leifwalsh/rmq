@@ -20,6 +20,8 @@ private:
 
   std::vector<tree> _children;
 
+  // A hack to allow the LCA implementation to inject an offset into a
+  // node.
   index_type _repr;
 
 public:
@@ -34,6 +36,7 @@ public:
       _children()
   {}
 
+  // No vector copying allowed.
   tree(const value_type &i, const std::vector<tree> &c) = delete;
 
   /**
@@ -44,14 +47,21 @@ public:
       _children(std::move(c))
   {}
 
+  /**
+   * Move constructor (marked noexcept so that vector will use it).
+   */
   tree(tree &&o) noexcept
     : _id(std::move(o._id)),
       _children(std::move(o._children)),
       _repr(std::move(o._repr))
   {}
 
+  // No copying allowed.
   tree(const tree &o) = delete;
 
+  /**
+   * Move assignment.
+   */
   tree& operator=(tree &&o) {
     _id = std::move(o._id);
     _children = std::move(o._children);
@@ -59,6 +69,7 @@ public:
     return *this;
   }
 
+  // No copying assignment allowed.
   tree& operator=(const tree &o) = delete;
 
   /**
